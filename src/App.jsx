@@ -241,7 +241,7 @@ function ImprovementCard({ item }) {
 
 function App() {
   const [brandName, setBrandName] = useState('Apex Studio');
-  const [tone, setTone] = useState('Professional & polished');
+  const [mood, setmood] = useState('Professional & polished');
   const [targetAudience, setTargetAudience] = useState('Tech professionals, remote workers, entrepreneurs');
   const [imageFile, setImageFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -266,7 +266,7 @@ function App() {
   };
 
   const handleGenerate = async () => {
-    if (!brandName.trim() || !tone.trim() || !targetAudience.trim()) {
+    if (!brandName.trim() || !mood.trim() || !targetAudience.trim()) {
       toast.error('Please complete all fields before generating.');
       return;
     }
@@ -277,7 +277,7 @@ function App() {
     try {
       const formData = new FormData();
       formData.append('brandName', brandName);
-      formData.append('tone', tone);
+      formData.append('mood', mood);
       formData.append('targetAudience', targetAudience);
       if (imageFile) {
         formData.append('image', imageFile);
@@ -394,10 +394,10 @@ function App() {
                 />
               </label>
               <label className="block text-sm text-slate-300">
-                Tone
+                mood
                 <input
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
+                  value={mood}
+                  onChange={(e) => setmood(e.target.value)}
                   className="mt-2 w-full rounded-3xl border border-slate-700/70 bg-slate-950/90 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-400/60"
                   placeholder="Professional, friendly, bold"
                 />
@@ -437,7 +437,7 @@ function App() {
               <p className="mt-3 text-slate-200">{loading ? 'Processing webhook response…' : 'Ready for generation'}</p>
               <div className="mt-5 space-y-2">
                 <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Brand: {brandName}</div>
-                <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Tone: {tone}</div>
+                <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">mood: {mood}</div>
                 <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Audience: {targetAudience}</div>
               </div>
             </div>
