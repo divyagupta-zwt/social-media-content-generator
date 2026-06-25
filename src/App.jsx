@@ -1,14 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FaInstagram, FaLinkedin, FaTwitter } from 'react-icons/fa';
-import { FiDownload, FiExternalLink, FiCopy } from 'react-icons/fi';
+import { FiDownload, FiExternalLink, FiCopy, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
 import { HiSparkles } from 'react-icons/hi';
 
-const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || '/generate';
+const GENERATE_URL = import.meta.env.VITE_WEBHOOK_URL || '/generate-content';
+const STATUS_URL_TEMPLATE = import.meta.env.VITE_STATUS_URL || GENERATE_URL.replace('generate-content', 'status/${executionId}');
+
+const STATUS_STEPS = [
+  { key: "uploading_image", label: "Uploading Image", msg: "Uploading your image..." },
+  { key: "analyzing_image", label: "Analyzing Image", msg: "Analyzing image content and marketing opportunities..." },
+  { key: "generating_content", label: "Generating Content", msg: "Generating platform-specific content..." },
+  { key: "calculating_scores", label: "Calculating Scores", msg: "Evaluating engagement and audience fit..." },
+  { key: "enhancing_image", label: "Enhancing Image", msg: "Creating optimized social media visuals..." },
+  { key: "completed", label: "Complete", msg: "Results ready!" }
+];
 
 const initialResponse = {
   analysis: {
@@ -58,13 +68,6 @@ const initialResponse = {
 };
 
 const tabList = ['Content', 'Analytics', 'Image Analysis', 'Enhanced Image'];
-const workflowSteps = [
-  'Uploading image',
-  'Analyzing image',
-  'Generating social content',
-  'Calculating performance scores',
-  'Enhancing image',
-];
 
 const platformIcon = {
   LinkedIn: FaLinkedin,
@@ -175,19 +178,80 @@ function ImageAnalysisAccordion({ content }) {
   );
 }
 
-function LoadingWorkflow({ stepIndex }) {
+function WorkflowTimeline({ currentStatus, isFailed }) {
+  const currentIndex = STATUS_STEPS.findIndex(s => s.key === currentStatus);
+  const activeIndex = currentIndex === -1 ? 0 : currentIndex;
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-glow backdrop-blur-xl">
-      <h3 className="text-lg font-semibold text-slate-100">Processing Workflow</h3>
-      <div className="mt-5 space-y-3">
-        {workflowSteps.map((step, index) => (
-          <div key={step} className="flex items-center gap-3 text-sm text-slate-300">
-            <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full border ${index <= stepIndex ? 'border-cyan-400 bg-cyan-400/15 text-cyan-300' : 'border-slate-700 text-slate-500'}`}>
-              {index <= stepIndex ? '✓' : index + 1}
+    <div className="mt-6 space-y-4">
+      {STATUS_STEPS.map((step, index) => {
+        let isCompleted = index < activeIndex || currentStatus === 'completed';
+        let isActive = index === activeIndex && !isFailed && currentStatus !== 'completed';
+        let isPending = index > activeIndex;
+        let isStepFailed = isFailed && index === activeIndex;
+
+        return (
+          <div key={step.key} className="flex items-center gap-4 text-sm text-slate-300">
+            <span className={`relative inline-flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-300 ${isCompleted ? 'border-cyan-400 bg-cyan-400/15 text-cyan-300' : isActive ? 'border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.5)] bg-slate-800 text-cyan-400 scale-110 z-10' : isStepFailed ? 'border-rose-500 bg-rose-500/20 text-rose-400' : 'border-slate-700 text-slate-500'}`}>
+              {isCompleted ? '✓' : isStepFailed ? '✗' : index + 1}
+              {isActive && (
+                <span className="absolute inset-0 rounded-full animate-ping border border-cyan-400 opacity-50"></span>
+              )}
             </span>
-            <span>{step}</span>
+            <span className={isCompleted ? 'text-cyan-100 font-medium' : isActive ? 'text-white font-semibold' : isStepFailed ? 'text-rose-200' : 'text-slate-500'}>
+              {step.label}
+            </span>
           </div>
-        ))}
+        );
+      })}
+    </div>
+  );
+}
+
+function WorkflowTracker({ status, progress, message }) {
+  return (
+    <div className="rounded-[2rem] border border-white/10 bg-slate-950/80 p-8 shadow-glow backdrop-blur-xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
+        <h3 className="text-xl font-semibold text-slate-100">{message || 'Processing...'}</h3>
+        <span className="text-cyan-400 font-semibold">{progress}%</span>
+      </div>
+      <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden mb-6">
+        <div 
+          className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-500 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <WorkflowTimeline currentStatus={status} isFailed={false} />
+    </div>
+  );
+}
+
+function FailureCard({ error, onRetry, onStartOver }) {
+  return (
+    <div className="rounded-[2rem] border border-rose-500/30 bg-rose-950/20 p-8 shadow-glow backdrop-blur-xl">
+      <div className="flex flex-col sm:flex-row items-center gap-4 text-rose-400 mb-6 text-center sm:text-left">
+        <FiAlertCircle size={32} />
+        <h3 className="text-2xl font-semibold text-white">Content Generation Failed</h3>
+      </div>
+      <div className="text-rose-200/80 mb-8 bg-rose-950/40 p-4 rounded-xl border border-rose-500/20">
+        <span className="font-semibold block mb-1">Reason:</span>
+        {error || 'Unknown error occurred.'}
+      </div>
+      <div className="flex flex-col sm:flex-row gap-4">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex justify-center items-center gap-2 rounded-full bg-rose-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-rose-600"
+        >
+          <FiRefreshCw /> Retry
+        </button>
+        <button
+          type="button"
+          onClick={onStartOver}
+          className="inline-flex justify-center items-center gap-2 rounded-full border border-slate-700 bg-transparent px-6 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white"
+        >
+          Start Over
+        </button>
       </div>
     </div>
   );
@@ -244,10 +308,17 @@ function App() {
   const [mood, setmood] = useState('Professional & polished');
   const [targetAudience, setTargetAudience] = useState('Tech professionals, remote workers, entrepreneurs');
   const [imageFile, setImageFile] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('Content');
   const [responseData, setResponseData] = useState(initialResponse);
-  const [workflowStep, setWorkflowStep] = useState(0);
+  
+  // Workflow State
+  const [status, setStatus] = useState('idle'); // 'idle' | uploading_image | ... | 'completed' | 'failed'
+  const [progress, setProgress] = useState(0);
+  const [executionId, setExecutionId] = useState(null);
+  const [error, setError] = useState(null);
+  
+  const pollTimerRef = useRef(null);
+  const timeoutRef = useRef(null);
 
   const platform = responseData.performance.best_platform || 'LinkedIn';
   const PlatformIcon = platformIcon[platform] || FaLinkedin;
@@ -265,64 +336,110 @@ function App() {
     setImageFile(event.target.files?.[0] || null);
   };
 
+  const clearTimers = () => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  };
+
+  const resetState = () => {
+    setStatus('idle');
+    setProgress(0);
+    setExecutionId(null);
+    setError(null);
+    clearTimers();
+  };
+
+  const startPolling = (execId) => {
+    clearTimers();
+    setExecutionId(execId);
+    
+    // 3 minute timeout
+    timeoutRef.current = setTimeout(() => {
+      clearTimers();
+      setStatus('failed');
+      setError('Processing is taking longer than expected. Please try again.');
+    }, 180000);
+
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const url = STATUS_URL_TEMPLATE.replace(':executionId', execId);
+        const res = await axios.get(url);
+        const data = res.data;
+        
+        if (data.status === 'completed') {
+          clearTimers();
+          setStatus('completed');
+          setProgress(100);
+          
+          const payload = data.result || {};
+          const normalized = {
+            ...initialResponse,
+            ...(payload.analysis ? payload : payload?.body || payload?.data || {}),
+            analysis: { ...initialResponse.analysis, ...(payload.analysis || payload?.analysis || {}) },
+            content: { ...initialResponse.content, ...(payload.content || payload?.content || {}) },
+            performance: { ...initialResponse.performance, ...(payload.performance || payload?.performance || {}) },
+            hashtags: payload.hashtags || payload?.hashtags || initialResponse.hashtags,
+            cta: payload.cta || payload?.cta || initialResponse.cta,
+            strengths: payload.strengths || payload?.strengths || initialResponse.strengths,
+            improvements: payload.improvements || payload?.improvements || initialResponse.improvements,
+            imageSuggestions: payload.imageSuggestions || payload?.imageSuggestions || initialResponse.imageSuggestions,
+            editedImageUrl: payload.editedImageUrl || payload?.editedImageUrl || initialResponse.editedImageUrl,
+          };
+          setResponseData(normalized);
+          toast.success('Results ready!');
+        } else if (data.status === 'failed') {
+          clearTimers();
+          setStatus('failed');
+          setError(data.error || data.result?.error || 'Unknown workflow error occurred.');
+        } else {
+          setStatus(data.status);
+          setProgress(data.progress || 0);
+        }
+      } catch (err) {
+        console.error(err);
+        clearTimers();
+        setStatus('failed');
+        setError('Network error while tracking progress. Please check your connection.');
+      }
+    }, 2000);
+  };
+
   const handleGenerate = async () => {
     if (!brandName.trim() || !mood.trim() || !targetAudience.trim()) {
       toast.error('Please complete all fields before generating.');
       return;
     }
 
-    setLoading(true);
-    setWorkflowStep(0);
+    resetState();
+    setStatus('uploading_image');
+    setProgress(10);
 
     try {
       const formData = new FormData();
       formData.append('brandName', brandName);
       formData.append('mood', mood);
       formData.append('targetAudience', targetAudience);
-      if (imageFile) {
-        formData.append('image', imageFile);
-      }
+      if (imageFile) formData.append('image', imageFile);
 
-      const response = await axios.post(WEBHOOK_URL, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      const response = await axios.post(GENERATE_URL, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      const payload = response.data;
-      const normalized = {
-        ...initialResponse,
-        ...(payload.analysis ? payload : payload?.body || payload?.data || {}),
-        analysis: {
-          ...initialResponse.analysis,
-          ...(payload.analysis || payload?.analysis || {}),
-        },
-        content: {
-          ...initialResponse.content,
-          ...(payload.content || payload?.content || {}),
-        },
-        performance: {
-          ...initialResponse.performance,
-          ...(payload.performance || payload?.performance || {}),
-        },
-        hashtags: payload.hashtags || payload?.hashtags || initialResponse.hashtags,
-        cta: payload.cta || payload?.cta || initialResponse.cta,
-        strengths: payload.strengths || payload?.strengths || initialResponse.strengths,
-        improvements: payload.improvements || payload?.improvements || initialResponse.improvements,
-        imageSuggestions: payload.imageSuggestions || payload?.imageSuggestions || initialResponse.imageSuggestions,
-        editedImageUrl: payload.editedImageUrl || payload?.editedImageUrl || initialResponse.editedImageUrl,
-      };
-
-      setResponseData(normalized);
-      toast.success('Content generated successfully');
-    } catch (error) {
-      console.error(error);
-      toast.error('Unable to generate content. Please try again.');
-    } finally {
-      setLoading(false);
-      setWorkflowStep(workflowSteps.length - 1);
+      if (response.data && response.data.executionId) {
+        startPolling(response.data.executionId);
+      } else {
+        throw new Error('No execution ID returned from server.');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus('failed');
+      setError(err.message || 'Unable to start generation. Please try again.');
     }
   };
+
+  useEffect(() => {
+    return () => clearTimers();
+  }, []);
 
   const analyticsPanel = useMemo(() => (
     <div className="space-y-6">
@@ -394,7 +511,7 @@ function App() {
                 />
               </label>
               <label className="block text-sm text-slate-300">
-                mood
+                Mood
                 <input
                   value={mood}
                   onChange={(e) => setmood(e.target.value)}
@@ -425,19 +542,20 @@ function App() {
               <button
                 type="button"
                 onClick={handleGenerate}
-                className="inline-flex w-full items-center justify-center gap-3 rounded-3xl bg-cyan-400 px-6 py-4 text-base font-semibold text-slate-950 transition hover:bg-cyan-300"
+                disabled={status !== 'idle' && status !== 'completed' && status !== 'failed'}
+                className="inline-flex w-full items-center justify-center gap-3 rounded-3xl bg-cyan-400 px-6 py-4 text-base font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Generating...' : 'Generate'}
+                {(status !== 'idle' && status !== 'completed' && status !== 'failed') ? 'Generating...' : 'Generate'}
                 <HiSparkles />
               </button>
               <p className="text-sm text-slate-400">Upload an image and generate AI-backed social content, performance insights, and image enhancement suggestions.</p>
             </div>
             <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-5 shadow-glow backdrop-blur-xl">
               <p className="text-sm uppercase tracking-[0.22em] text-cyan-300/70">Status</p>
-              <p className="mt-3 text-slate-200">{loading ? 'Processing webhook response…' : 'Ready for generation'}</p>
+              <p className="mt-3 text-slate-200 capitalize">{(status === 'idle' || status === 'completed') ? 'Ready for generation' : status?.replace('_', ' ') || ""}</p>
               <div className="mt-5 space-y-2">
                 <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Brand: {brandName}</div>
-                <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">mood: {mood}</div>
+                <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Mood: {mood}</div>
                 <div className="rounded-full bg-slate-800/80 p-4 text-sm text-slate-300">Audience: {targetAudience}</div>
               </div>
             </div>
@@ -465,10 +583,16 @@ function App() {
               </div>
             </div>
 
-            {loading ? <LoadingWorkflow stepIndex={workflowStep} /> : null}
+            {status !== 'idle' && status !== 'completed' && status !== 'failed' && (
+               <WorkflowTracker status={status} progress={progress} message={STATUS_STEPS.find(s => s.key === status)?.msg || 'Processing...'} />
+            )}
+
+            {status === 'failed' && (
+               <FailureCard error={error} onRetry={handleGenerate} onStartOver={resetState} />
+            )}
 
             <AnimatePresence mode="wait">
-              {activeTab === 'Content' && !loading && (
+              {activeTab === 'Content' && status === 'completed' && (
                 <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }} className="space-y-6">
                   <div className="grid gap-6 lg:grid-cols-3">
                     <ContentCard label="Instagram" icon={<FaInstagram size={20} />} text={responseData.content.instagram} />
@@ -503,13 +627,13 @@ function App() {
                 </motion.div>
               )}
 
-              {activeTab === 'Analytics' && !loading && (
+              {activeTab === 'Analytics' && status === 'completed' && (
                 <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }}>
                   {analyticsPanel}
                 </motion.div>
               )}
 
-              {activeTab === 'Image Analysis' && !loading && (
+              {activeTab === 'Image Analysis' && status === 'completed' && (
                 <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }} className="grid gap-6 lg:grid-cols-[0.9fr_0.7fr]">
                   <div className="grid gap-6">
                     <DashboardCard title="Subject">
@@ -553,7 +677,7 @@ function App() {
                 </motion.div>
               )}
 
-              {activeTab === 'Enhanced Image' && !loading && (
+              {activeTab === 'Enhanced Image' && status === 'completed' && (
                 <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }} className="space-y-6">
                   <div className="grid gap-6 lg:grid-cols-[0.9fr_0.5fr]">
                     <div className="rounded-[2rem] overflow-hidden border border-white/10 bg-slate-950/80 shadow-glow">
