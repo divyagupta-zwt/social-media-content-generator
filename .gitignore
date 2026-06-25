@@ -1,3 +1,5 @@
 .env
 node_modules
-workflow.json
+process-content.json
+generate-content.json
+status.json
